@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BicoAgora — Serviços na Hora</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Outfit:wght@400;500;700;900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+<link rel="stylesheet" href="css/style.css" />
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+  import {
+    getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+    signOut, onAuthStateChanged, updateProfile
+  } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+  import {
+    getFirestore, collection, doc, setDoc, addDoc, getDoc, getDocs,
+    query, where, orderBy, limit, updateDoc, onSnapshot, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+  // ⚠️ COLE AQUI AS CREDENCIAIS DO SEU PROJETO FIREBASE ⚠️
+  const firebaseConfig = {
+    apiKey: "COLE_AQUI_SUA_API_KEY",
+    authDomain: "SEU-PROJETO.firebaseapp.com",
+    projectId: "SEU-PROJETO",
+    storageBucket: "SEU-PROJETO.appspot.com",
+    messagingSenderId: "000000000000",
+    appId: "1:000000000000:web:xxxxxxxxxxxxxxxxxxxx"
+  };
+
+  const app  = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+
+  // Expõe no escopo global (window) para o restante do script,
+  // que não é module, conseguir usar essas funções do Firebase.
+  window.fb = {
+    auth, db,
+    createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
+    onAuthStateChanged, updateProfile,
+    collection, doc, setDoc, addDoc, getDoc, getDocs,
+    query, where, orderBy, limit, updateDoc, onSnapshot, serverTimestamp
+  };
+  window.fbReady = true;
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
+
+</head>
+<body>
+
+<!-- ── TOPBAR ── -->
+<nav class="topbar">
+  <div class="logo" onclick="goTo('home')" ondblclick="triggerBackstage()" title="BicoAgora">Bico<em>Agora</em></div>
+  <div class="topbar-right">
+    <button class="btn-topbar" id="btn-login-nav" onclick="openAuth()">Entrar</button>
+    <button class="btn-topbar primary" id="btn-publish-nav" onclick="goTo('register')" style="display:none">+ Publicar serviço</button>
+    <div class="nav">
+      <button class="nav-btn active" onclick="goTo('home')">Contratar</button>
+      <button class="nav-btn" onclick="goTo('register')">Oferecer</button>
+    </div>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════
+     HOME
+══════════════════════════════════ -->
+<div id="s-home" class="screen active">
+  <!-- Banner de geolocalização -->
+  <div class="geo-banner" id="geo-banner" style="display:none">
+    <i class="fa-solid fa-location-crosshairs"></i>
+    <span class="geo-text" id="geo-text">Ative a localização para ver profissionais perto de você</span>
+    <button onclick="requestGeo()">Ativar</button>
+  </div>
+
+  <div class="hero">
+    <div class="live-pill"><div class="pulse"></div>18 profissionais disponíveis agora</div>
+    <h1>Encontre quem faz<br><em>hoje mesmo</em></h1>
+    <p class="hero-sub">Técnico, designer, montador, professor, entregador — resolva agora sem complicação.</p>
+
+    <!-- abas de busca -->
+    <div class="search-tabs">
+      <button class="search-tab active" id="tab-service" onclick="switchSearchTab('service')"><i class="fa-solid fa-magnifying-glass"></i> Por serviço</button>
+      <button class="search-tab" id="tab-cep" onclick="switchSearchTab('cep')"><i class="fa-solid fa-location-dot"></i> Por CEP</button>
+    </div>
+
+    <!-- busca por serviço -->
+    <div id="search-service-box" class="searchbar">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <input type="text" id="search-input" placeholder="O que você precisa? Ex: encanador, aulas de inglês…" />
+      <button onclick="doSearch()">Buscar</button>
+    </div>
+
+    <!-- busca por CEP -->
+    <div id="search-cep-box" class="searchbar" style="display:none;flex-wrap:wrap;gap:8px">
+      <i class="fa-solid fa-location-dot"></i>
+      <input type="text" id="cep-input" placeholder="Digite seu CEP (ex: 41820-021)" maxlength="9"
+             oninput="maskCep(this)" onkeydown="if(event.key==='Enter')buscarCep()" style="flex:1;min-width:130px"/>
+      <button onclick="buscarCep()" id="cep-btn">Buscar</button>
+      <!-- resultado do CEP -->
+      <div id="cep-result" style="width:100%;display:none">
+        <div id="cep-location-pill" style="display:inline-flex;align-items:center;gap:7px;background:var(--green-light);color:var(--green-dark);font-size:13px;font-weight:700;padding:7px 14px;border-radius:100px;margin-bottom:4px">
+          <i class="fa-solid fa-location-dot"></i>
+          <span id="cep-location-text">—</span>
+          <button onclick="limparCep()" style="background:none;border:none;color:var(--green-dark);cursor:pointer;font-size:13px;margin-left:4px;padding:0">✕</button>
+        </div>
+        <div id="cep-count-text" style="font-size:12px;color:var(--ink-3);margin-left:4px"></div>
+      </div>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat"><strong>4.800+</strong><span>Profissionais</span></div>
+      <div class="hero-stat"><strong>98%</strong><span>Avaliações positivas</span></div>
+      <div class="hero-stat"><strong>12 min</strong><span>Resposta média</span></div>
+      <div class="hero-stat"><strong>R$0</strong><span>Para se cadastrar</span></div>
+    </div>
+  </div>
+
+  <div class="cat-strip">
+    <button class="cat-btn sel" onclick="selCat(this,'Todos')"><div class="cat-icon">⚡</div><span class="cat-label">Todos</span></button>
+    <button class="cat-btn" onclick="selCat(this,'Tecnologia')"><div class="cat-icon">💻</div><span class="cat-label">Tecnologia</span></button>
+    <button class="cat-btn" onclick="selCat(this,'Reformas')"><div class="cat-icon">🔧</div><span class="cat-label">Reformas</span></button>
+    <button class="cat-btn" onclick="selCat(this,'Design')"><div class="cat-icon">🎨</div><span class="cat-label">Design</span></button>
+    <button class="cat-btn" onclick="selCat(this,'Aulas')"><div class="cat-icon">📚</div><span class="cat-label">Aulas</span></button>
+    <button class="cat-btn" onclick="selCat(this,'Entrega')"><div class="cat-icon">🚗</div><span class="cat-label">Entrega</span></button>
+    <button class="cat-btn" onclick="selCat(this,'Pet')"><div class="cat-icon">🐾</div><span class="cat-label">Pet</span></button>
+    <button class="cat-btn" onclick="selCat(this,'Beleza')"><div class="cat-icon">✂️</div><span class="cat-label">Beleza</span></button>
+  </div>
+
+  <div class="filters">
+    <button class="chip sel" onclick="selChip(this)"><i class="fa-solid fa-bolt"></i> Disponíveis agora</button>
+    <button class="chip" onclick="selChip(this)"><i class="fa-solid fa-star"></i> Mais bem avaliados</button>
+    <button class="chip" onclick="selChip(this)"><i class="fa-solid fa-tag"></i> Menor preço</button>
+    <button class="chip" onclick="selChip(this)"><i class="fa-solid fa-location-dot"></i> Mais próximo</button>
+    <button class="chip" onclick="selChip(this)"><i class="fa-solid fa-circle-check"></i> Verificados</button>
+  </div>
+
+  <div class="section-header">
+    <div class="section-title" id="list-title">Disponíveis agora</div>
+    <div class="section-count" id="list-count">6 profissionais</div>
+  </div>
+
+  <div class="cards" id="cards-list">
+
+    <div class="worker-card top" data-cat="Tecnologia" onclick="showProfile('lucas')">
+      <div class="card-badge"><span class="qbadge qbadge-top">⭐ Top</span></div>
+      <div class="card-top">
+        <div class="avatar av-b">LF</div>
+        <div class="card-meta">
+          <div class="card-name">Lucas Ferreira</div>
+          <div class="card-role">Técnico de TI · Suporte e Redes</div>
+          <div class="badges">
+            <span class="badge-now"><i class="fa-solid fa-circle" style="font-size:7px"></i> Disponível agora</span>
+            <span class="badge-dist"><i class="fa-solid fa-location-dot"></i>1,4 km · Salvador, BA</span>
+          </div>
+        </div>
+        <div class="stars-sm"><i class="fa-solid fa-star"></i> 4.9 <span style="color:var(--ink-3)">(53)</span></div>
+      </div>
+      <div class="tags"><span class="tag">Formatação</span><span class="tag">Redes Wi-Fi</span><span class="tag">Câmeras CFTV</span><span class="tag">Impressoras</span></div>
+      <div class="card-footer">
+        <div class="price"><strong>R$ 80</strong> <small>/ hora</small></div>
+        <button class="btn-book" onclick="event.stopPropagation();showProfile('lucas')">Ver perfil</button>
+      </div>
+    </div>
+
+    <div class="worker-card" data-cat="Design" onclick="showProfile('marina')">
+      <div class="card-badge"><span class="qbadge qbadge-verified">✔ Verificado</span></div>
+      <div class="card-top">
+        <div class="avatar av-d">MC</div>
+        <div class="card-meta">
+          <div class="card-name">Marina Castro</div>
+          <div class="card-role">Designer Gráfica · Social Media</div>
+          <div class="badges">
+            <span class="badge-now"><i class="fa-solid fa-circle" style="font-size:7px"></i> Disponível agora</span>
+            <span class="badge-dist"><i class="fa-solid fa-location-dot"></i>Online</span>
+          </div>
+        </div>
+        <div class="stars-sm"><i class="fa-solid fa-star"></i> 5.0 <span style="color:var(--ink-3)">(29)</span></div>
+      </div>
+      <div class="tags"><span class="tag">Logo</span><span class="tag">Posts</span><span class="tag">Canva / Figma</span><span class="tag">Flyer</span></div>
+      <div class="card-footer">
+        <div class="price"><strong>R$ 60</strong> <small>/ peça</small></div>
+        <button class="btn-book" onclick="event.stopPropagation();showProfile('marina')">Ver perfil</button>
+      </div>
+    </div>
+
+    <div class="worker-card" data-cat="Reformas" onclick="showProfile('joao')">
+      <div class="card-top">
+        <div class="avatar av-c">JP</div>
+        <div class="card-meta">
+          <div class="card-name">João Pereira</div>
+          <div class="card-role">Montador · Eletricista Residencial</div>
+          <div class="badges">
+            <span class="badge-soon"><i class="fa-regular fa-clock" style="font-size:10px"></i> Em 30 min</span>
+            <span class="badge-dist"><i class="fa-solid fa-location-dot"></i>2,1 km · Salvador, BA</span>
+          </div>
+        </div>
+        <div class="stars-sm"><i class="fa-solid fa-star"></i> 4.8 <span style="color:var(--ink-3)">(41)</span></div>
+      </div>
+      <div class="tags"><span class="tag">Móveis</span><span class="tag">Tomadas</span><span class="tag">Ar-condicionado</span><span class="tag">Suporte TV</span></div>
+      <div class="card-footer">
+        <div class="price"><strong>R$ 100</strong> <small>/ visita</small></div>
+        <button class="btn-book" onclick="event.stopPropagation();showProfile('joao')">Ver perfil</button>
+      </div>
+    </div>
+
+    <div class="worker-card top" data-cat="Aulas" onclick="showProfile('priya')">
+      <div class="card-badge"><span class="qbadge qbadge-top">⭐ Top</span></div>
+      <div class="card-top">
+        <div class="avatar av-a">PR</div>
+        <div class="card-meta">
+          <div class="card-name">Priya Rodrigues</div>
+          <div class="card-role">Professora · Inglês e Espanhol</div>
+          <div class="badges">
+            <span class="badge-now"><i class="fa-solid fa-circle" style="font-size:7px"></i> Disponível agora</span>
+            <span class="badge-dist"><i class="fa-solid fa-location-dot"></i>Online / Presencial</span>
+          </div>
+        </div>
+        <div class="stars-sm"><i class="fa-solid fa-star"></i> 4.9 <span style="color:var(--ink-3)">(88)</span></div>
+      </div>
+      <div class="tags"><span class="tag">Conversação</span><span class="tag">IELTS/TOEFL</span><span class="tag">Básico ao Avançado</span></div>
+      <div class="card-footer">
+        <div class="price"><strong>R$ 70</strong> <small>/ aula</small></div>
+        <button class="btn-book" onclick="event.stopPropagation();showProfile('priya')">Ver perfil</button>
+      </div>
+    </div>
+
+    <div class="worker-card" data-cat="Entrega" onclick="showProfile('rafael')">
+      <div class="card-badge"><span class="qbadge qbadge-verified">✔ Verificado</span></div>
+      <div class="card-top">
+        <div class="avatar av-e">RS</div>
+        <div class="card-meta">
+          <div class="card-name">Rafael Silva</div>
+          <div class="card-role">Motorista · Entregas e Mudanças</div>
+          <div class="badges">
+            <span class="badge-now"><i class="fa-solid fa-circle" style="font-size:7px"></i> Disponível agora</span>
+            <span class="badge-dist"><i class="fa-solid fa-location-dot"></i>0,8 km · Salvador, BA</span>
+          </div>
+        </div>
+        <div class="stars-sm"><i class="fa-solid fa-star"></i> 4.7 <span style="color:var(--ink-3)">(34)</span></div>
+      </div>
+      <div class="tags"><span class="tag">Van própria</span><span class="tag">Entregas SSA</span><span class="tag">Pequenas mudanças</span></div>
+      <div class="card-footer">
+        <div class="price"><strong>R$ 50</strong> <small>/ corrida</small></div>
+        <button class="btn-book" onclick="event.stopPropagation();showProfile('rafael')">Ver perfil</button>
+      </div>
+    </div>
+
+    <div class="worker-card" data-cat="Beleza" onclick="showProfile('bianca')">
+      <div class="card-top">
+        <div class="avatar av-f">BN</div>
+        <div class="card-meta">
+          <div class="card-name">Bianca Nunes</div>
+          <div class="card-role">Cabeleireira · Manicure a Domicílio</div>
+          <div class="badges">
+            <span class="badge-now"><i class="fa-solid fa-circle" style="font-size:7px"></i> Disponível agora</span>
+            <span class="badge-dist"><i class="fa-solid fa-location-dot"></i>1,9 km · Salvador, BA</span>
+          </div>
+        </div>
+        <div class="stars-sm"><i class="fa-solid fa-star"></i> 4.8 <span style="color:var(--ink-3)">(57)</span></div>
+      </div>
+      <div class="tags"><span class="tag">Manicure</span><span class="tag">Escova</span><span class="tag">Corte</span><span class="tag">Sobrancelha</span></div>
+      <div class="card-footer">
+        <div class="price"><strong>R$ 45</strong> <small>/ serviço</small></div>
+        <button class="btn-book" onclick="event.stopPropagation();showProfile('bianca')">Ver perfil</button>
+      </div>
+    </div>
+
+  </div><!-- /cards-list -->
+
+  <!-- COMO FUNCIONA -->
+  <div class="how-section">
+    <h2 class="how-title">Como o <em>BicoAgora</em> funciona</h2>
+    <div class="how-grid">
+      <div class="how-step"><div class="how-num">1</div><h3>Busque o serviço</h3><p>Digite o que você precisa e veja profissionais avaliados perto de você em segundos.</p></div>
+      <div class="how-step"><div class="how-num">2</div><h3>Escolha e agende</h3><p>Veja o perfil completo, portfólio, avaliações reais e escolha o horário disponível hoje.</p></div>
+      <div class="how-step"><div class="how-num">3</div><h3>🔒 Pagamento em custódia</h3><p>Você paga e o dinheiro fica retido na BicoAgora — o profissional ainda não recebe.</p></div>
+      <div class="how-step"><div class="how-num">4</div><h3>✅ Libere ao confirmar</h3><p>Recebeu o serviço? Confirme na sua conta. Problema? Abra uma disputa e mediamos.</p></div>
+    </div>
+  </div>
+
+  <!-- CTA PROFISSIONAL -->
+  <div class="cta-pro">
+    <h2>Você é profissional?<br><em>Comece a ganhar hoje.</em></h2>
+    <p>Crie seu perfil grátis, defina seus preços e receba pedidos direto no celular. Sem mensalidade — cobramos apenas 15% por serviço concluído.</p>
+    <button class="btn-cta-pro" onclick="goTo('register')"><i class="fa-solid fa-rocket"></i> &nbsp;Cadastrar grátis</button>
+  </div>
+
+  <footer>
+    <strong>BicoAgora</strong> — Conectando pessoas a profissionais de confiança em Salvador e região.<br>
+    BicoAgora cobra <strong>15%</strong> por serviço concluído &nbsp;·&nbsp; Sem mensalidade &nbsp;·&nbsp; Pagamento seguro
+  </footer>
+  <div class="spacer"></div>
+</div>
+
+<!-- ══════════════════════════════════
+     PERFIL DO PROFISSIONAL
+══════════════════════════════════ -->
+<div id="s-profile" class="screen">
+  <button class="btn-back" onclick="goTo('home')"><i class="fa-solid fa-arrow-left"></i> Voltar</button>
+  <div id="profile-content"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ══════════════════════════════════
+     CHECKOUT  (3 passos)
+══════════════════════════════════ -->
+<div id="s-checkout" class="screen">
+  <div class="checkout-page">
+    <button class="btn-back" style="margin:16px 0 0;margin-left:0" onclick="goTo('profile')"><i class="fa-solid fa-arrow-left"></i> Voltar ao perfil</button>
+
+    <!-- stepper -->
+    <div class="stepper">
+      <div class="step-wrap"><div class="step-dot done" id="st1">✓</div><div class="step-label active">Resumo</div></div>
+      <div class="step-line done" id="sl1"></div>
+      <div class="step-wrap"><div class="step-dot active" id="st2">2</div><div class="step-label active">Pagamento</div></div>
+      <div class="step-line" id="sl2"></div>
+      <div class="step-wrap"><div class="step-dot idle" id="st3">3</div><div class="step-label">Agendamento</div></div>
+    </div>
+
+    <div class="checkout-card" id="checkout-summary"></div>
+
+    <div class="checkout-card">
+      <div class="checkout-card-title">Forma de pagamento</div>
+      <div class="pay-options">
+        <div class="pay-opt sel" onclick="selPay(this)"><input type="radio" name="pay" checked><label>💳 Cartão de crédito</label></div>
+        <div class="pay-opt" onclick="selPay(this)"><input type="radio" name="pay"><label>📱 Pix <span class="pix-note">— 5% de desconto</span></label></div>
+        <div class="pay-opt" onclick="selPay(this)"><input type="radio" name="pay"><label>🏦 Boleto bancário</label></div>
+      </div>
+    </div>
+
+    <div class="checkout-card">
+      <div class="checkout-card-title">Agendamento</div>
+      <div class="frow">
+        <div class="fgroup"><label class="flabel">Data preferida</label><input class="finput" type="date" id="sched-date"></div>
+        <div class="fgroup">
+          <label class="flabel">Período</label>
+          <select class="fselect">
+            <option>Manhã (8h – 12h)</option>
+            <option>Tarde (13h – 18h)</option>
+            <option>Noite (19h – 21h)</option>
+            <option>Qualquer horário</option>
+          </select>
+        </div>
+      </div>
+      <div class="fgroup"><label class="flabel">Observações (opcional)</label><textarea class="ftextarea" rows="3" placeholder="Descreva melhor o que precisa — endereço, detalhes do problema…"></textarea></div>
+    </div>
+
+    <button class="btn-full" onclick="confirmOrder()"><i class="fa-solid fa-lock"></i> Pagar com segurança (escrow)</button>
+    <div class="pay-secure-badge"><i class="fa-solid fa-lock"></i> Dinheiro retido na BicoAgora — liberado só após você confirmar o serviço</div>
+  </div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ══════════════════════════════════
+     PAINEL DO PROFISSIONAL
+══════════════════════════════════ -->
+<div id="s-prodash" class="screen">
+  <div class="pro-dash">
+    <div class="pro-dash-header">
+      <div class="pro-dash-av av-b">LF</div>
+      <div class="pro-dash-info">
+        <h3>Lucas Ferreira</h3>
+        <p>Técnico de TI · Salvador, BA</p>
+        <div style="color:var(--yellow);font-size:13px;margin-top:4px">★ 4.9 <span style="color:rgba(255,255,255,.4);font-size:12px">(53 avaliações)</span></div>
+      </div>
+      <div class="pro-status-toggle">
+        <div class="toggle on" onclick="this.classList.toggle('on')"><div class="toggle-k"></div></div>
+        <span class="toggle-label">Online</span>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">Ganhos este mês</div><div class="kpi-value">R$1.240</div><div class="kpi-trend">↑ 18% vs mês passado</div></div>
+      <div class="kpi-card"><div class="kpi-label">Pedidos concluídos</div><div class="kpi-value">53</div><div class="kpi-trend">↑ 4 esta semana</div></div>
+      <div class="kpi-card"><div class="kpi-label">Avaliação média</div><div class="kpi-value">4.9 ★</div><div class="kpi-trend">96% positivo</div></div>
+      <div class="kpi-card"><div class="kpi-label">Taxa de resposta</div><div class="kpi-value">98%</div><div class="kpi-trend warn">meta: 100%</div></div>
+    </div>
+
+    <div class="pro-orders-title">Pedidos recentes</div>
+
+    <div class="order-card">
+      <div class="order-card-icon">💻</div>
+      <div class="order-card-info">
+        <div class="order-card-name">Tiago M. — Formatação de notebook</div>
+        <div class="order-card-sub">Hoje, 14:00 · Pituba</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        <div class="order-card-val">R$80</div>
+        <span class="o-status o-pending">Aguardando</span>
+      </div>
+    </div>
+
+    <div class="order-card">
+      <div class="order-card-icon">📶</div>
+      <div class="order-card-info">
+        <div class="order-card-name">Cláudia R. — Configuração de rede</div>
+        <div class="order-card-sub">Hoje, 10:30 · Barra</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        <div class="order-card-val">R$120</div>
+        <span class="o-status o-progress">Em andamento</span>
+      </div>
+    </div>
+
+    <div class="order-card">
+      <div class="order-card-icon">🖨️</div>
+      <div class="order-card-info">
+        <div class="order-card-name">André N. — Impressora sem fio</div>
+        <div class="order-card-sub">Ontem · Ondina</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        <div class="order-card-val">R$80</div>
+        <span class="o-status o-ok">Concluído</span>
+      </div>
+    </div>
+
+    <div class="order-card">
+      <div class="order-card-icon">📷</div>
+      <div class="order-card-info">
+        <div class="order-card-name">Isabela P. — Câmera CFTV</div>
+        <div class="order-card-sub">Ontem · Stella Maris</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        <div class="order-card-val">R$160</div>
+        <span class="o-status o-ok">Concluído</span>
+      </div>
+    </div>
+    <div class="spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     MINHA CONTA
+══════════════════════════════════ -->
+<div id="s-account" class="screen">
+  <div class="form-page">
+    <!-- Estado: deslogado -->
+    <div id="account-guest" style="display:none">
+      <div style="text-align:center;padding:40px 0 24px">
+        <div style="font-size:48px;margin-bottom:16px">👤</div>
+        <h2 style="margin-bottom:8px">Sua conta BicoAgora</h2>
+        <p style="color:var(--ink-2);font-size:14px;margin-bottom:24px">Entre para ver seus pedidos, histórico e gerenciar seu perfil.</p>
+        <button class="btn-full" onclick="openAuth()" style="max-width:300px;margin:0 auto"><i class="fa-solid fa-right-to-bracket"></i> Entrar ou criar conta</button>
+      </div>
+    </div>
+
+    <!-- Estado: logado -->
+    <div id="account-logged" style="display:none">
+      <!-- Cabeçalho do perfil -->
+      <div style="background:linear-gradient(135deg,var(--green-dark),var(--green));border-radius:var(--radius-xl);padding:24px 20px;margin-bottom:20px;color:#fff">
+        <div style="display:flex;align-items:center;gap:16px">
+          <div id="account-av" style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900;font-family:'Outfit',sans-serif;border:2px solid rgba(255,255,255,.4)">--</div>
+          <div style="flex:1">
+            <div id="account-name" style="font-size:18px;font-weight:700;font-family:'Outfit',sans-serif">Carregando…</div>
+            <div id="account-email" style="font-size:12px;opacity:.7;margin-top:2px"></div>
+            <div id="account-type-badge" style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:100px;background:rgba(255,255,255,.2);font-size:11px;font-weight:700">Cliente</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ação rápida: Painel profissional (só para pros) -->
+      <div id="account-pro-card" style="display:none;background:var(--green-light);border:1.5px solid rgba(0,192,127,.3);border-radius:var(--radius-lg);padding:16px;margin-bottom:16px;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div>
+            <div style="font-weight:700;font-size:14px;color:var(--green-dark)"><i class="fa-solid fa-briefcase"></i> Você é profissional</div>
+            <div style="font-size:12px;color:var(--ink-2);margin-top:3px">Veja seus pedidos, ganhos e avaliações</div>
+          </div>
+          <button class="btn-book" onclick="goTo('prodash')">Meu painel →</button>
+        </div>
+      </div>
+
+      <!-- Pedidos do cliente -->
+      <div style="font-weight:700;font-size:14px;margin-bottom:12px;color:var(--ink)">Meus pedidos</div>
+      <div id="account-orders-list">
+        <div style="text-align:center;padding:24px;color:var(--ink-3);font-size:13px" id="account-orders-empty">
+          <i class="fa-solid fa-box-open" style="font-size:28px;margin-bottom:10px;display:block"></i>
+          Você ainda não fez nenhum pedido.<br>
+          <button class="btn-book" style="margin-top:12px" onclick="goTo('home')">Encontrar profissionais</button>
+        </div>
+      </div>
+
+      <!-- Ações da conta -->
+      <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:20px;display:flex;flex-direction:column;gap:10px">
+        <button class="btn-topbar" style="width:100%;justify-content:center;padding:12px;display:flex;gap:8px;align-items:center" onclick="goTo('register')">
+          <i class="fa-solid fa-plus"></i> Virar profissional também
+        </button>
+        <button class="btn-topbar" style="width:100%;justify-content:center;padding:12px;display:flex;gap:8px;align-items:center;color:#C72828;border-color:#ffc9c9" onclick="doLogout()">
+          <i class="fa-solid fa-right-from-bracket"></i> Sair da conta
+        </button>
+      </div>
+    </div>
+  </div>
+  <div class="spacer"></div>
+</div>
+
+<!-- ══════════════════════════════════
+     CADASTRO PROFISSIONAL
+══════════════════════════════════ -->
+<div id="s-register" class="screen">
+  <div class="form-page">
+    <h2>Ofereça seus serviços</h2>
+    <p>Cadastre seu perfil e comece a receber pedidos ainda hoje. Grátis para cadastrar — cobramos apenas 15% quando o serviço é concluído.</p>
+
+    <div class="earning-bar">
+      <div class="earning-bar-text">
+        <strong>Estou disponível agora</strong>
+        <small>Apareça para quem precisa do seu serviço</small>
+      </div>
+      <div class="toggle on" onclick="this.classList.toggle('on')"><div class="toggle-k"></div></div>
+    </div>
+
+    <div class="fgroup"><label class="flabel">Nome completo</label><input class="finput" type="text" id="r-name" placeholder="Seu nome completo" /></div>
+    <div class="frow">
+      <div class="fgroup"><label class="flabel">Telefone / WhatsApp</label><input class="finput" type="tel" id="r-phone" placeholder="(71) 9 0000-0000" /></div>
+      <div class="fgroup">
+        <label class="flabel">CEP de atuação</label>
+        <div style="position:relative">
+          <input class="finput" type="text" id="r-cep" placeholder="Ex: 41820-021" maxlength="9"
+                 oninput="maskCep(this)" onblur="autoFillCep()" style="padding-right:40px"/>
+          <span id="r-cep-spinner" style="display:none;position:absolute;right:13px;top:50%;transform:translateY(-50%)">
+            <span style="display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .6s linear infinite"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+    <div id="r-address-row" style="display:none">
+      <div class="frow">
+        <div class="fgroup"><label class="flabel">Bairro</label><input class="finput" type="text" id="r-bairro" placeholder="Bairro" /></div>
+        <div class="fgroup"><label class="flabel">Cidade / UF</label><input class="finput" type="text" id="r-cidade" placeholder="Salvador, BA" /></div>
+      </div>
+    </div>
+    <div class="frow">
+      <div class="fgroup">
+        <label class="flabel">Categoria principal</label>
+        <select class="fselect">
+          <option>Tecnologia / TI</option>
+          <option>Design e Criação</option>
+          <option>Reformas e Reparos</option>
+          <option>Aulas e Cursos</option>
+          <option>Entregas e Transporte</option>
+          <option>Beleza e Estética</option>
+          <option>Pet e Animais</option>
+          <option>Eventos e Festas</option>
+          <option>Outros</option>
+        </select>
+      </div>
+      <div class="fgroup">
+        <label class="flabel">Modalidade</label>
+        <select class="fselect">
+          <option>Presencial</option>
+          <option>Online (remoto)</option>
+          <option>Presencial e Online</option>
+        </select>
+      </div>
+    </div>
+    <div class="fgroup"><label class="flabel">Preço por serviço (R$)</label><input class="finput" type="number" placeholder="Ex: 80" min="20" /></div>
+
+    <div class="fgroup">
+      <label class="flabel" style="margin-bottom:10px">Serviços que você oferece</label>
+      <div class="services-grid">
+        <div class="svc-opt on" onclick="this.classList.toggle('on')"><i class="fa-solid fa-laptop"></i> Informática</div>
+        <div class="svc-opt" onclick="this.classList.toggle('on')"><i class="fa-solid fa-palette"></i> Design</div>
+        <div class="svc-opt" onclick="this.classList.toggle('on')"><i class="fa-solid fa-wrench"></i> Reparos</div>
+        <div class="svc-opt" onclick="this.classList.toggle('on')"><i class="fa-solid fa-book-open"></i> Aulas</div>
+        <div class="svc-opt" onclick="this.classList.toggle('on')"><i class="fa-solid fa-car"></i> Entregas</div>
+        <div class="svc-opt" onclick="this.classList.toggle('on')"><i class="fa-solid fa-scissors"></i> Beleza</div>
+        <div class="svc-opt" onclick="this.classList.toggle('on')"><i class="fa-solid fa-paw"></i> Pet</div>
+        <div class="svc-opt" onclick="this.classList.toggle('on')"><i class="fa-solid fa-camera"></i> Fotografia</div>
+      </div>
+    </div>
+
+    <div class="fgroup"><label class="flabel">Sobre você (2–3 linhas)</label><textarea class="ftextarea" rows="3" placeholder="Ex: 4 anos formatando PCs e configurando redes Wi-Fi em Salvador. Atendo em domicílio com peças em estoque…"></textarea></div>
+    <button class="btn-full" onclick="submitRegister()"><i class="fa-solid fa-rocket"></i> Criar perfil e começar a receber pedidos</button>
+    <div class="spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     ADMIN
+══════════════════════════════════ -->
+<div id="s-admin" class="screen">
+  <div class="admin-page">
+    <h2>Painel operacional</h2>
+    <div class="status-pill"><div class="pulse"></div> Plataforma ativa</div>
+
+    <div class="metrics">
+      <div class="metric"><div class="metric-l">Pedidos hoje</div><div class="metric-v">41</div><div class="metric-c">+14 vs ontem</div></div>
+      <div class="metric"><div class="metric-l">Profissionais ativos</div><div class="metric-v">18</div><div class="metric-c">11 online agora</div></div>
+      <div class="metric"><div class="metric-l">Volume (R$)</div><div class="metric-v">4,2k</div><div class="metric-c">+18% semanal</div></div>
+      <div class="metric"><div class="metric-l">Receita plataforma</div><div class="metric-v">R$634</div><div class="metric-c">↑ 23% vs mês passado</div></div>
+      <div class="metric"><div class="metric-l">🔒 Em custódia</div><div class="metric-v" id="adm-held-val">—</div><div class="metric-c" id="adm-held-c">carregando…</div></div>
+      <div class="metric"><div class="metric-l">⚠️ Em disputa</div><div class="metric-v" id="adm-dispute-val">—</div><div class="metric-c warn" id="adm-dispute-c">carregando…</div></div>
+    </div>
+
+    <div class="adm-title">Disputas em aberto — mediação</div>
+    <div id="adm-disputes-table" class="adm-table">
+      <div class="adm-head" style="grid-template-columns:2fr 1.5fr 1fr 1.2fr"><span>Cliente/Profissional</span><span>Motivo</span><span>Valor</span><span>Ação</span></div>
+      <div id="adm-disputes-rows" style="padding:14px;text-align:center;font-size:13px;color:var(--ink-3)">Carregando disputas…</div>
+    </div>
+
+    <div class="adm-title">Profissionais cadastrados</div>
+    <div class="adm-table">
+      <div class="adm-head"><span>Nome</span><span>Categoria</span><span>Nota</span><span>Pedidos</span></div>
+      <div class="adm-row"><strong>Lucas Ferreira</strong><span class="sdot"><span class="dot dot-g"></span>TI</span><span>4.9 ★</span><span>53</span></div>
+      <div class="adm-row"><strong>Marina Castro</strong><span class="sdot"><span class="dot dot-g"></span>Design</span><span>5.0 ★</span><span>29</span></div>
+      <div class="adm-row"><strong>João Pereira</strong><span class="sdot"><span class="dot dot-a"></span>Reformas</span><span>4.8 ★</span><span>41</span></div>
+      <div class="adm-row"><strong>Priya Rodrigues</strong><span class="sdot"><span class="dot dot-g"></span>Aulas</span><span>4.9 ★</span><span>88</span></div>
+      <div class="adm-row"><strong>Rafael Silva</strong><span class="sdot"><span class="dot dot-g"></span>Entregas</span><span>4.7 ★</span><span>34</span></div>
+      <div class="adm-row"><strong>Bianca Nunes</strong><span class="sdot"><span class="dot dot-gr"></span>Beleza</span><span>4.8 ★</span><span>57</span></div>
+    </div>
+
+    <div class="adm-title">Pedidos recentes</div>
+    <div class="adm-table">
+      <div class="adm-head"><span>Cliente</span><span>Serviço</span><span>Valor</span><span>Status</span></div>
+      <div class="adm-row"><strong>Tiago M.</strong><span>TI</span><span>R$80</span><span><span class="ostatus" style="background:#FFF3CE;color:#7A5000">Aguardando</span></span></div>
+      <div class="adm-row"><strong>Cláudia R.</strong><span>Design</span><span>R$60</span><span><span class="ostatus" style="background:#D0FAE8;color:#006B44">Confirmado</span></span></div>
+      <div class="adm-row"><strong>André N.</strong><span>Montagem</span><span>R$100</span><span><span class="ostatus" style="background:#D0FAE8;color:#006B44">Concluído</span></span></div>
+      <div class="adm-row"><strong>Isabela P.</strong><span>Aula inglês</span><span>R$70</span><span><span class="ostatus" style="background:#D0FAE8;color:#006B44">Concluído</span></span></div>
+      <div class="adm-row"><strong>Marcos A.</strong><span>Entrega</span><span>R$50</span><span><span class="ostatus" style="background:#E0EDFF;color:#1A5DBF">Em andamento</span></span></div>
+    </div>
+    <div class="spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     ADMIN LOGIN MODAL
+══════════════════════════════════ -->
+<div class="overlay" id="admin-login-overlay" onclick="closeAdminLoginOutside(event)">
+  <div class="auth-box" onclick="event.stopPropagation()" style="max-width:360px">
+    <div class="auth-header">
+      <div class="auth-title">🔒 Acesso restrito</div>
+      <button class="btn-close-auth" onclick="closeAdminLogin()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <p style="font-size:13px;color:var(--ink-2);margin-bottom:16px">Área restrita. Digite a senha de acesso.</p>
+    <div class="fgroup">
+      <label class="flabel">Senha do admin</label>
+      <div style="position:relative">
+        <input class="finput" type="password" id="admin-pw-input" placeholder="••••••••" onkeydown="if(event.key==='Enter')checkAdminPw()" style="padding-right:44px">
+        <button onclick="toggleAdminPwVis()" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink-3);font-size:15px" id="admin-pw-eye"><i class="fa-solid fa-eye"></i></button>
+      </div>
+    </div>
+    <div id="admin-pw-error" style="display:none;color:#C72828;font-size:12px;font-weight:700;margin-bottom:10px">Senha incorreta. Tente novamente.</div>
+    <button class="btn-auth" onclick="checkAdminPw()">Entrar</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     PAINEL DO DONO (owner dashboard)
+══════════════════════════════════ -->
+<div id="s-owner" class="screen">
+  <div class="admin-page">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
+      <h2 style="margin-bottom:0">📊 Meu negócio</h2>
+      <select id="owner-period" class="fselect" style="width:auto;padding:8px 32px 8px 12px;font-size:13px" onchange="renderOwnerDash()">
+        <option value="7">Últimos 7 dias</option>
+        <option value="30" selected>Últimos 30 dias</option>
+        <option value="90">Últimos 90 dias</option>
+      </select>
+    </div>
+    <p style="font-size:13px;color:var(--ink-2);margin-bottom:20px">Visão geral da saúde do BicoAgora — combina dados simulados de mercado com os pedidos reais registrados neste navegador.</p>
+
+    <div class="metrics" id="owner-kpis" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))"></div>
+
+    <div class="adm-title" style="margin-top:24px">Receita por categoria</div>
+    <div id="owner-cat-bars" style="display:flex;flex-direction:column;gap:10px;margin-bottom:24px"></div>
+
+    <div class="adm-title">Simulador de split de pagamento</div>
+    <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:20px">
+      <p style="font-size:13px;color:var(--ink-2);margin-bottom:14px">Veja como o Pagar.me / Stripe Connect vai dividir automaticamente cada pagamento.</p>
+      <div class="frow" style="align-items:flex-end">
+        <div class="fgroup" style="margin-bottom:0">
+          <label class="flabel">Valor do serviço (R$)</label>
+          <input class="finput" type="number" id="split-input" value="200" min="1" oninput="calcSplit()">
+        </div>
+        <div class="fgroup" style="margin-bottom:0">
+          <label class="flabel">Taxa plataforma (%)</label>
+          <input class="finput" type="number" id="split-fee" value="15" min="1" max="50" oninput="calcSplit()">
+        </div>
+      </div>
+      <div id="split-result" style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
+      <div style="margin-top:14px;padding:12px;background:var(--green-light);border-radius:var(--radius-md);border:1px solid rgba(0,192,127,.25)">
+        <p style="font-size:12px;color:var(--green-dark);font-weight:600">💡 Em produção, use <strong>Pagar.me Marketplace</strong> ou <strong>Stripe Connect</strong>. O split acontece automaticamente — o profissional recebe a parte dele na hora, você recebe a taxa sem tocar no dinheiro.</p>
+      </div>
+    </div>
+
+    <div class="adm-title">Pedidos reais registrados neste navegador</div>
+    <div class="adm-table" style="margin-bottom:24px">
+      <div class="adm-head"><span>Cliente</span><span>Profissional</span><span>Valor</span><span>Sua taxa</span></div>
+      <div id="owner-real-orders"></div>
+    </div>
+
+    <div class="adm-title">Alertas do sistema</div>
+    <div id="owner-alerts" style="display:flex;flex-direction:column;gap:8px;margin-bottom:32px"></div>
+  </div>
+  <div class="spacer"></div>
+</div>
+
+<style>
+.split-card { background:var(--bg);border-radius:var(--radius-md);padding:14px;text-align:center; }
+.split-card .split-who { font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px; }
+.split-card .split-val { font-family:'Outfit',sans-serif;font-size:26px;font-weight:900; }
+.split-card .split-pct { font-size:12px;color:var(--ink-2);margin-top:2px; }
+.cat-bar-row { display:flex;align-items:center;gap:10px; }
+.cat-bar-label { width:90px;font-size:12px;font-weight:600;color:var(--ink-2);flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.cat-bar-track { flex:1;height:10px;background:var(--bg);border-radius:100px;overflow:hidden; }
+.cat-bar-fill { height:100%;background:var(--green);border-radius:100px;transition:width .4s ease; }
+.cat-bar-val { width:52px;text-align:right;font-size:12px;font-weight:700;color:var(--ink);flex-shrink:0; }
+.alert-card { display:flex;align-items:center;gap:12px;padding:13px 15px;border-radius:var(--radius-md);border:1.5px solid; }
+.alert-card.warn { background:#FFF8E1;border-color:#FFD600;color:#7A5000; }
+.alert-card.ok   { background:#E6FAF3;border-color:var(--green);color:var(--green-dark); }
+.alert-card.info { background:#E0EDFF;border-color:#93BBF7;color:#1A5DBF; }
+.alert-card .alert-icon { font-size:18px;flex-shrink:0; }
+.alert-card .alert-text { font-size:13px;font-weight:600; }
+</style>
+
+
+<div class="modal-bg" id="booking-modal" onclick="closeBookingOutside(event)">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <button class="btn-close" onclick="closeBookingModal()"><i class="fa-solid fa-xmark"></i></button>
+    <div class="modal-head">
+      <div class="modal-av av-b" id="m-av">LF</div>
+      <div class="modal-name-block">
+        <h3 id="m-name">Lucas Ferreira</h3>
+        <p id="m-sub">Técnico de TI · Suporte e Redes</p>
+        <div class="stars-sm" style="margin-top:5px"><i class="fa-solid fa-star"></i> <span id="m-rating">4.9</span> <span style="color:var(--ink-3)">(<span id="m-count">53</span> avaliações)</span></div>
+      </div>
+    </div>
+    <div class="msection">
+      <div class="msection-title">Escolha o horário de hoje</div>
+      <div class="slots" id="m-slots">
+        <div class="slot sel" onclick="selSlot(this)">Agora<small>~15 min</small></div>
+        <div class="slot" onclick="selSlot(this)">14:00<small>tarde</small></div>
+        <div class="slot" onclick="selSlot(this)">16:30<small>tarde</small></div>
+        <div class="slot" onclick="selSlot(this)">18:00<small>noite</small></div>
+      </div>
+    </div>
+    <div class="msection">
+      <div class="msection-title">Avaliações recentes</div>
+      <div class="modal-reviews" id="m-reviews"></div>
+    </div>
+    <button class="btn-full" onclick="confirmBooking()"><i class="fa-brands fa-whatsapp"></i> Confirmar e contatar pelo WhatsApp</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     AUTH MODAL
+══════════════════════════════════ -->
+<div class="overlay" id="auth-overlay" onclick="closeAuthOutside(event)">
+  <div class="auth-box" onclick="event.stopPropagation()">
+    <div class="auth-header">
+      <div class="auth-title">Entrar na BicoAgora</div>
+      <button class="btn-close-auth" onclick="closeAuth()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" onclick="switchAuthTab(this,'login')">Entrar</button>
+      <button class="auth-tab" onclick="switchAuthTab(this,'signup')">Criar conta</button>
+    </div>
+    <div class="auth-form active" id="auth-login">
+      <div class="fgroup"><label class="flabel">E-mail</label><input class="finput" type="email" placeholder="seu@email.com"></div>
+      <div class="fgroup"><label class="flabel">Senha</label><input class="finput" type="password" placeholder="••••••••"></div>
+      <button class="btn-auth" onclick="doLogin()">Entrar</button>
+      <p class="auth-note">Esqueceu a senha? <a href="#">Recuperar acesso</a></p>
+    </div>
+    <div class="auth-form" id="auth-signup">
+      <div class="fgroup"><label class="flabel">Nome completo</label><input class="finput" type="text" placeholder="Maria Silva"></div>
+      <div class="fgroup"><label class="flabel">E-mail</label><input class="finput" type="email" placeholder="seu@email.com"></div>
+      <div class="fgroup"><label class="flabel">Telefone / WhatsApp</label><input class="finput" type="tel" placeholder="(71) 9 9999-0000"></div>
+      <div class="fgroup"><label class="flabel">Senha</label><input class="finput" type="password" placeholder="Mín. 8 caracteres"></div>
+      <button class="btn-auth" onclick="doSignup()">Criar conta grátis</button>
+      <p class="auth-note">Ao criar conta você concorda com os <a href="#">Termos de uso</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     AVALIAÇÃO PÓS-SERVIÇO
+══════════════════════════════════ -->
+<div class="rating-overlay" id="rating-overlay" onclick="closeRatingOutside(event)">
+  <div class="rating-box" onclick="event.stopPropagation()">
+    <h3>Como foi o serviço?</h3>
+    <p id="rating-pro-name">Avalie Lucas Ferreira</p>
+    <div class="rating-stars" id="rating-stars">
+      <i class="fa-solid fa-star" onclick="setRating(1)"></i>
+      <i class="fa-solid fa-star" onclick="setRating(2)"></i>
+      <i class="fa-solid fa-star" onclick="setRating(3)"></i>
+      <i class="fa-solid fa-star" onclick="setRating(4)"></i>
+      <i class="fa-solid fa-star" onclick="setRating(5)"></i>
+    </div>
+    <textarea class="rating-comment" rows="3" placeholder="Conte como foi a experiência (opcional)…"></textarea>
+    <button class="btn-full" onclick="submitRating()">Enviar avaliação</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
